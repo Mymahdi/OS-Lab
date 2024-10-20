@@ -15,11 +15,16 @@
 #include "proc.h"
 #include "x86.h"
 
+#define KEY_UP          0xE2
+#define KEY_DN          0xE3
 #define KEY_LF          0xE4
 #define KEY_RT          0xE5
 
-#define MAX_COMMAND_LENGTH          (128)
+#define MAX_COMMAND_LENGTH          (128)  
+#define MAX_HISTORY                 (16)  
 
+char commandHistory[MAX_HISTORY][MAX_COMMAND_LENGTH];
+int commandHistoryCounter = 0;
 int currentCommandId = 0;
 
 static void consputc(int);
@@ -30,6 +35,27 @@ static struct {
   struct spinlock lock;
   int locking;
 } cons;
+
+void addHistory(char *command){
+if(command[0]!='\0')
+{
+    int length = strlen(command) <= MAX_COMMAND_LENGTH ? strlen(command) : MAX_COMMAND_LENGTH-1;
+    int i;
+
+    if(commandHistoryCounter < MAX_HISTORY){
+      commandHistoryCounter++;
+    }else{
+      for(i = 0; i < MAX_HISTORY - 1; i++){
+        memmove(commandHistory[i], commandHistory[i+1], sizeof(char)* MAX_COMMAND_LENGTH);
+      }   
+    }
+
+    memmove(commandHistory[commandHistoryCounter-1], command, sizeof(char)* length);
+    commandHistory[commandHistoryCounter-1][length] = '\0';
+
+    currentCommandId = commandHistoryCounter - 1;
+  }
+}
 
 static void
 printint(int xx, int base, int sign)
@@ -153,10 +179,9 @@ cgaputc(int c)
 {
   int pos;
   
-  // Cursor position: col + 80*row.
-  outb(CRTPORT, 14);        
+  outb(CRTPORT, 14);                  //read line number？ 1280 ... 256 per line？？
   pos = inb(CRTPORT+1) << 8;
-  outb(CRTPORT, 15);                
+  outb(CRTPORT, 15);                  //read column? 2
   pos |= inb(CRTPORT+1);    
 
   if(c == '\n')
@@ -194,6 +219,7 @@ void vga_move_back_cursor(){
   outb(CRTPORT+1, (unsigned char)(pos&0xFF));
   outb(CRTPORT, 14);
   outb(CRTPORT+1, (unsigned char )((pos>>8)&0xFF));
+  //crt[pos] = ' ' | 0x0700;
 }
 
 void vga_move_forward_cursor(){
@@ -210,6 +236,7 @@ void vga_move_forward_cursor(){
   outb(CRTPORT+1, (unsigned char)(pos&0xFF));
   outb(CRTPORT, 14);
   outb(CRTPORT+1, (unsigned char )((pos>>8)&0xFF));
+  //crt[pos] = ' ' | 0x0700;
 }
 
 void vga_insert_char(int c, int back_counter){
@@ -260,6 +287,7 @@ consputc(int c)
       ;
   }
 
+  // write to serial port
   if(c == BACKSPACE){
     uartputc('\b'); 
     uartputc(' '); 
@@ -267,6 +295,7 @@ consputc(int c)
   } else
     uartputc(c);
 
+  // write to screen
   cgaputc(c);
 }
 
@@ -276,7 +305,7 @@ void
 consoleintr(int (*getc)(void))
 {
   int c;
-  //char buffer[MAX_COMMAND_LENGTH];
+  char buffer[MAX_COMMAND_LENGTH];
 
   acquire(&cons.lock);
   while((c = getc()) >= 0){
@@ -298,15 +327,15 @@ consoleintr(int (*getc)(void))
       }
       break;
     case KEY_LF:
-      if(input.pos > input.r){ 
+      if(input.pos > input.r){  
         input.pos --;
         back_counter += 1;
         vga_move_back_cursor();
       }
       break;
     case KEY_RT:
-      if(input.pos < input.e){  
-        input.pos ++; 
+      if(input.pos < input.e){   
+        input.pos ++;
         back_counter -= 1;
         vga_move_forward_cursor();
       }
@@ -318,7 +347,7 @@ consoleintr(int (*getc)(void))
         uartputc(c); 
 
         c = (c == '\r') ? '\n' : c;
-        if(c == '\n' || c == C('D') || input.e == input.r+INPUT_BUF){ 
+        if(c == '\n' || c == C('D') || input.e == input.r+INPUT_BUF){
 
           input.buf[input.e++ % INPUT_BUF] = c;
           consputc(c);
@@ -326,9 +355,11 @@ consoleintr(int (*getc)(void))
           back_counter = 0;
 
           for(int i=input.w, k=0; i < input.e-1; i++, k++){
-            //buffer[k] = input.buf[i % INPUT_BUF];
+            buffer[k] = input.buf[i % INPUT_BUF];
           }
-          //buffer[(input.e-1-input.w) % INPUT_BUF] = '\0';
+          buffer[(input.e-1-input.w) % INPUT_BUF] = '\0';
+
+          addHistory(buffer);
           input.w = input.e;
           input.pos = input.e;
           wakeup(&input.r);
@@ -420,13 +451,11 @@ void
 consoleinit(void)
 {
   initlock(&cons.lock, "console");
-  //initlock(&input.lock, "input");
 
   devsw[CONSOLE].write = consolewrite;
   devsw[CONSOLE].read = consoleread;
   cons.locking = 1;
 
-  //picenable(IRQ_KBD);
   ioapicenable(IRQ_KBD, 0);
 }
 
