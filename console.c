@@ -14,6 +14,7 @@
 #include "mmu.h"
 #include "proc.h"
 #include "x86.h"
+#include <stdio.h>
 
 #define KEY_UP          0xE2
 #define KEY_DN          0xE3
@@ -360,6 +361,7 @@ void loadCommand()
 char input_buffer[MAX_INPUT_SIZE]; // Array to store characters
 int input_index = 0; // Current index in the buffer
 int capturing = 0;
+int capture_start = 0; 
 
 void consoleintr(int (*getc)(void))
 {
@@ -403,18 +405,16 @@ void consoleintr(int (*getc)(void))
       }
       break;
     case C('S'):
-      capturing = 1; // Start capturing
-      input_index = 0; // Reset index
-      cprintf("Capturing input... (type your input)\n");
+      capturing = 1;
+      capture_start = input.e; 
       break;
 
     case C('F'):
-      capturing = 0; // Stop capturing
-      cprintf("\nPasted input: ");
-      for (int i = 0; i < input_index; i++) {
-          cprintf("%c", input_buffer[i]); // Print captured input
+      capturing = 0;
+      for (int i = capture_start; i < input.e; i++) {
+          consputc(input.buf[i % INPUT_BUF]);
       }
-      cprintf("\n");
+
     break;
 
     case KEY_RT:
@@ -473,7 +473,6 @@ void consoleintr(int (*getc)(void))
     default:
       if (c != 0 && input.e - input.r < INPUT_BUF)
       {
-
         c = (c == '\r') ? END_OF_LINE : c;
         if (c == END_OF_LINE || c == C('D') || input.e == input.r + INPUT_BUF)
         {
@@ -500,7 +499,7 @@ void consoleintr(int (*getc)(void))
   release(&cons.lock);
   if (doprocdump)
   {
-    procdump(); // now call procdump() wo. cons.lock held
+    procdump();
   }
 }
 
