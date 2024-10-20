@@ -21,6 +21,7 @@
 #define KEY_RT          0xE5
 
 #define MAX_COMMAND_LENGTH          (128)  
+#define MAX_INPUT_SIZE               (100)
 #define MAX_HISTORY                 (16)  
 
 char commandHistory[MAX_HISTORY][MAX_COMMAND_LENGTH];
@@ -300,18 +301,22 @@ consputc(int c)
 }
 
 #define C(x)  ((x)-'@')  // Control-x
+int capturing = 0; // Flag to indicate capturing state
+int input_index = 0;
+char input_buffer[MAX_INPUT_SIZE];
 
-void
-consoleintr(int (*getc)(void))
+void consoleintr(int (*getc)(void))
 {
-  int c;
+  int c, doprocdump = 0;
   char buffer[MAX_COMMAND_LENGTH];
 
   acquire(&cons.lock);
   while((c = getc()) >= 0){
     switch(c){
+
     case C('P'):  // Process listing.
-      procdump();
+      doprocdump = 1;
+      //procdump();
       break;
     case C('U'):  // Kill line.
       while(input.e != input.w &&
@@ -326,6 +331,23 @@ consoleintr(int (*getc)(void))
         consputc(BACKSPACE);
       }
       break;
+
+    case C('S'):  // Backspace
+        capturing = 1; // Start capturing
+        input_index = 0; // Reset index
+        cprintf("Capturing input... (type your input)\n");
+      break;
+
+
+      case C('F'):
+        capturing = 0;
+        cprintf("\nPasted input: ");
+        for (int i = 0; i < input_index; i++) {
+            cprintf("%c", input_buffer[i]); // Print captured input
+        }
+        cprintf("\n");
+        break;
+
     case KEY_LF:
       if(input.pos > input.r){  
         input.pos --;
@@ -334,15 +356,25 @@ consoleintr(int (*getc)(void))
       }
       break;
     case KEY_RT:
-      if(input.pos < input.e){   
-        input.pos ++;
+      if(input.pos < input.e){   // cannot beyond most left character
+        input.pos ++; // move back one
         back_counter -= 1;
         vga_move_forward_cursor();
       }
       break;
     default:
       if(c != 0 && input.e-input.r < INPUT_BUF){
-
+            if (capturing) {
+              if (input_index < MAX_INPUT_SIZE - 1) { // Avoid overflow
+                  input_buffer[input_index++] = c; // Store character
+              }
+              // Optionally, you can echo the characters typed
+              if (c != '\n') { // Don't echo newline
+                  cprintf("%c", c); // Echo back the character
+              } else {
+                  cprintf("\n"); // Handle newline
+              }
+            }
         uartputc('-');
         uartputc(c); 
 
@@ -392,6 +424,11 @@ consoleintr(int (*getc)(void))
     }
   }
   release(&cons.lock);
+    if (doprocdump)
+  {
+    procdump(); // now call procdump() wo. cons.lock held
+  }
+
 }
 
 int
@@ -406,7 +443,7 @@ consoleread(struct inode *ip, char *dst, int n)
   while(n > 0){
     while(input.r == input.w){
       if(myproc()->killed){
-        release(&cons.lock);
+        release(&input.lock);
         ilock(ip);
         return -1;
       }
