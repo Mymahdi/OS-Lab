@@ -20,43 +20,15 @@
 #define KEY_LF          0xE4
 #define KEY_RT          0xE5
 
-#define MAX_COMMAND_LENGTH          (128)  
-#define MAX_INPUT_SIZE               (100)
-#define MAX_HISTORY                 (16)  
-
-char commandHistory[MAX_HISTORY][MAX_COMMAND_LENGTH];
-int commandHistoryCounter = 0;
-int currentCommandId = 0;
-
 static void consputc(int);
 
 static int panicked = 0;
 
-static struct {
+static struct
+{
   struct spinlock lock;
   int locking;
 } cons;
-
-void addHistory(char *command){
-if(command[0]!='\0')
-{
-    int length = strlen(command) <= MAX_COMMAND_LENGTH ? strlen(command) : MAX_COMMAND_LENGTH-1;
-    int i;
-
-    if(commandHistoryCounter < MAX_HISTORY){
-      commandHistoryCounter++;
-    }else{
-      for(i = 0; i < MAX_HISTORY - 1; i++){
-        memmove(commandHistory[i], commandHistory[i+1], sizeof(char)* MAX_COMMAND_LENGTH);
-      }   
-    }
-
-    memmove(commandHistory[commandHistoryCounter-1], command, sizeof(char)* length);
-    commandHistory[commandHistoryCounter-1][length] = '\0';
-
-    currentCommandId = commandHistoryCounter - 1;
-  }
-}
 
 static void
 printint(int xx, int base, int sign)
@@ -66,49 +38,52 @@ printint(int xx, int base, int sign)
   int i;
   uint x;
 
-  if(sign && (sign = xx < 0))
+  if (sign && (sign = xx < 0))
     x = -xx;
   else
     x = xx;
 
   i = 0;
-  do{
+  do
+  {
     buf[i++] = digits[x % base];
-  }while((x /= base) != 0);
+  } while ((x /= base) != 0);
 
-  if(sign)
+  if (sign)
     buf[i++] = '-';
 
-  while(--i >= 0)
+  while (--i >= 0)
     consputc(buf[i]);
 }
-//PAGEBREAK: 50
+// PAGEBREAK: 50
 
 // Print to the console. only understands %d, %x, %p, %s.
-void
-cprintf(char *fmt, ...)
+void cprintf(char *fmt, ...)
 {
   int i, c, locking;
   uint *argp;
   char *s;
 
   locking = cons.locking;
-  if(locking)
+  if (locking)
     acquire(&cons.lock);
 
   if (fmt == 0)
     panic("null fmt");
 
-  argp = (uint*)(void*)(&fmt + 1);
-  for(i = 0; (c = fmt[i] & 0xff) != 0; i++){
-    if(c != '%'){
+  argp = (uint *)(void *)(&fmt + 1);
+  for (i = 0; (c = fmt[i] & 0xff) != 0; i++)
+  {
+    if (c != '%')
+    {
       consputc(c);
       continue;
     }
     c = fmt[++i] & 0xff;
-    if(c == 0)
+    if (c == 0)
       break;
-    switch(c){
+    switch (c)
+    {
     case 'd':
       printint(*argp++, 10, 1);
       break;
@@ -117,9 +92,9 @@ cprintf(char *fmt, ...)
       printint(*argp++, 16, 0);
       break;
     case 's':
-      if((s = (char*)*argp++) == 0)
+      if ((s = (char *)*argp++) == 0)
         s = "(null)";
-      for(; *s; s++)
+      for (; *s; s++)
         consputc(*s);
       break;
     case '%':
@@ -133,306 +108,388 @@ cprintf(char *fmt, ...)
     }
   }
 
-  if(locking)
+  if (locking)
     release(&cons.lock);
 }
 
-void
-panic(char *s)
+void panic(char *s)
 {
   int i;
   uint pcs[10];
-  
+
   cli();
   cons.locking = 0;
   // use lapiccpunum so that we can call panic from mycpu()
   cprintf("lapicid %d: panic: ", lapicid());
-  //cprintf("cpu%d: panic: ", cpu->id);
   cprintf(s);
   cprintf("\n");
   getcallerpcs(&s, pcs);
-  for(i=0; i<10; i++)
+  for (i = 0; i < 10; i++)
     cprintf(" %p", pcs[i]);
   panicked = 1; // freeze other CPU
-  for(;;)
+  for (;;)
     ;
 }
 
-int back_counter = 0;
+// PAGEBREAK: 50
+#define BACKSPACE 0x100
+#define CURSORBACK 0x101
+#define SHIFTRIGHT 0x102
+#define SHIFTLEFT 0x103
+#define CURSORFORWARD 0x104
+#define CURSORRESET 0x105
+#define CLEAR 0x106
+
+#define CRTLEN 80 * 25
+#define CRTPORT 0x3d4
+static ushort *crt = (ushort *)P2V(0xb8000); // CGA memory
+
+#define END_OF_ARRAY '\0'
+#define END_OF_LINE '\n'
 
 #define INPUT_BUF 128
-struct {
-  struct spinlock lock;
+struct
+{
   char buf[INPUT_BUF];
-  uint r;  // Read index
-  uint w;  // Write index
-  uint e;  // Edit index
-  uint pos; // current pos, real cursor pos = row * 80 + pos 
+  uint r; // Read index
+  uint w; // Write index
+  uint e; // Edit index
+  uint pointer;
 } input;
 
-//PAGEBREAK: 50
-#define BACKSPACE 0x100
-#define CRTPORT 0x3d4
-static ushort *crt = (ushort*)P2V(0xb8000);  // CGA memory
+#define CMD_BUF_SIZE 10
+struct
+{
+  char buf[CMD_BUF_SIZE][INPUT_BUF];
+  uint r; // buffer head index
+  uint w; // Write index
+  uint pointer;
+  uint s;        // buffer size
+  uint movement; // movement in relation to head
+} cmd_buffer;
+
+#define C(x) ((x) - '@') // Control-x
+#define ARROW_UP 0xE2
+#define ARROW_DOWN 0xE3
+
+#define CAN_ARROW_UP (cmd_buffer.movement >= cmd_buffer.s) ? 0 : 1
+#define CAN_ARROW_DOWN (cmd_buffer.movement <= 1) ? 0 : 1
 
 static void
 cgaputc(int c)
 {
   int pos;
-  
-  outb(CRTPORT, 14);                  //read line number？ 1280 ... 256 per line？？
-  pos = inb(CRTPORT+1) << 8;
-  outb(CRTPORT, 15);                  //read column? 2
-  pos |= inb(CRTPORT+1);    
 
-  if(c == '\n')
-    pos += 80 - pos%80;
-  else if(c == BACKSPACE){
-    if(pos > 0) --pos;
-  } else
-    crt[pos++] = (c&0xff) | 0x0700;  // black on white
-  
-  if((pos/80) >= 24){  // Scroll up.
-    memmove(crt, crt+80, sizeof(crt[0])*23*80);
+  // Cursor position: col + 80*row.
+  outb(CRTPORT, 14);
+  pos = inb(CRTPORT + 1) << 8;
+  outb(CRTPORT, 15);
+  pos |= inb(CRTPORT + 1);
+
+  if (c == END_OF_LINE)
+    pos += 80 - pos % 80;
+  else if (c == BACKSPACE)
+  {
+    if (pos > 0)
+      --pos;
+    crt[pos] = ' ' | 0x0700;
+  }
+  else if (c == CURSORBACK)
+  {
+    if (pos > 0)
+      --pos;
+  }
+  else if (c == CURSORFORWARD)
+  {
+    pos++;
+  }
+  else if (c == SHIFTRIGHT)
+  {
+    for (int i = (pos + input.e - input.pointer); i > pos; i--)
+    {
+      crt[i] = crt[i - 1];
+    }
+  }
+  else if (c == SHIFTLEFT)
+  {
+    for (int i = pos - 1; i < (pos + input.e - input.pointer); i++)
+    {
+      crt[i] = crt[i + 1];
+    }
+    crt[pos + input.e - input.pointer] = ' ';
+    pos--;
+  }
+  else if (c == CURSORRESET)
+  {
+    pos += input.e - input.pointer;
+    while (pos % 80 != 2)
+    {
+      crt[--pos] = ' ' | 0x0700;
+    }
+  }
+
+  else if (c == CLEAR)
+  {
+    for (int i = 0; i <= CRTLEN; i++)
+    {
+      crt[i] = ' ' | 0x0700;
+    }
+    pos = 0;
+  }
+
+  else if (c == ARROW_UP || c == ARROW_DOWN)
+  {
+    for (int i = (pos % 80); i > 2; i--)
+    {
+      crt[pos] = ' ' | 0x0700;
+      pos--;
+    }
+    for (int i = 0; i < (input.e - input.w) % INPUT_BUF; i++)
+    {
+      crt[pos] = (input.buf[(i + input.w) % INPUT_BUF] & 0xff) | 0x0700;
+      pos++;
+    }
+  }
+
+  else
+    crt[pos++] = (c & 0xff) | 0x0700; // black on white
+
+  if (pos < 0 || pos > 25 * 80)
+    panic("pos under/overflow");
+
+  if ((pos / 80) >= 24)
+  { // Scroll up.
+    memmove(crt, crt + 80, sizeof(crt[0]) * 23 * 80);
     pos -= 80;
-    memset(crt+pos, 0, sizeof(crt[0])*(24*80 - pos));
+    memset(crt + pos, 0, sizeof(crt[0]) * (24 * 80 - pos));
   }
-  
+
   outb(CRTPORT, 14);
-  outb(CRTPORT+1, pos>>8);
+  outb(CRTPORT + 1, pos >> 8);
   outb(CRTPORT, 15);
-  outb(CRTPORT+1, pos);
-  crt[pos] = ' ' | 0x0700;
-}
-
-
-void vga_move_back_cursor(){
-  int pos;
-  
-  outb(CRTPORT, 14);                  
-  pos = inb(CRTPORT+1) << 8;
-  outb(CRTPORT, 15);
-  pos |= inb(CRTPORT+1);    
-
-  pos--;
-
-  outb(CRTPORT, 15);
-  outb(CRTPORT+1, (unsigned char)(pos&0xFF));
-  outb(CRTPORT, 14);
-  outb(CRTPORT+1, (unsigned char )((pos>>8)&0xFF));
-  //crt[pos] = ' ' | 0x0700;
-}
-
-void vga_move_forward_cursor(){
-  int pos;
-  
-  outb(CRTPORT, 14);                  
-  pos = inb(CRTPORT+1) << 8;
-  outb(CRTPORT, 15);
-  pos |= inb(CRTPORT+1);    
-
-  pos++;
-
-  outb(CRTPORT, 15);
-  outb(CRTPORT+1, (unsigned char)(pos&0xFF));
-  outb(CRTPORT, 14);
-  outb(CRTPORT+1, (unsigned char )((pos>>8)&0xFF));
-  //crt[pos] = ' ' | 0x0700;
-}
-
-void vga_insert_char(int c, int back_counter){
-  int pos;
-
-  outb(CRTPORT, 14);                  
-  pos = inb(CRTPORT+1) << 8;
-  outb(CRTPORT, 15);
-  pos |= inb(CRTPORT+1);
-
-  for(int i = pos + back_counter; i >= pos; i--){
-    crt[i+1] = crt[i];
+  outb(CRTPORT + 1, pos);
+  if (input.e == input.pointer /*|| c ==CONTROLL*/)
+  {
+    crt[pos] = ' ' | 0x0700;
   }
-  crt[pos] = (c&0xff) | 0x0700;  
-
-  pos += 1;
-
-  outb(CRTPORT, 14);
-  outb(CRTPORT+1, pos>>8);
-  outb(CRTPORT, 15);
-  outb(CRTPORT+1, pos);
-  crt[pos+back_counter] = ' ' | 0x0700;
 }
 
-void vga_remove_char(){
-  int pos;
-  
-  outb(CRTPORT, 14);                  
-  pos = inb(CRTPORT+1) << 8;
-  outb(CRTPORT, 15);
-  pos |= inb(CRTPORT+1);    
-
-  pos--;
-
-  outb(CRTPORT, 15);
-  outb(CRTPORT+1, (unsigned char)(pos&0xFF));
-  outb(CRTPORT, 14);
-  outb(CRTPORT+1, (unsigned char )((pos>>8)&0xFF));
-  crt[pos] = ' ' | 0x0700;
-}
-
-void
-consputc(int c)
+void consputc(int c)
 {
-  if(panicked){
+  if (panicked)
+  {
     cli();
-    for(;;)
+    for (;;)
       ;
   }
 
-  // write to serial port
-  if(c == BACKSPACE){
-    uartputc('\b'); 
-    uartputc(' '); 
+  if (c == BACKSPACE)
+  {
     uartputc('\b');
-  } else
+    uartputc(' ');
+    uartputc('\b');
+  }
+  else
     uartputc(c);
-
-  // write to screen
   cgaputc(c);
 }
 
-#define C(x)  ((x)-'@')  // Control-x
-int capturing = 0; // Flag to indicate capturing state
-int input_index = 0;
-char input_buffer[MAX_INPUT_SIZE];
+void shiftRight()
+{
+  for (int i = input.e; i > input.pointer; i--)
+  {
+    input.buf[i % INPUT_BUF] = input.buf[(i - 1) % INPUT_BUF];
+  }
+}
+
+void shiftLeft()
+{
+  for (int i = input.pointer - 1; i < input.e; i++)
+  {
+    input.buf[i % INPUT_BUF] = input.buf[(i + 1) % INPUT_BUF];
+  }
+}
+
+void recordCommand()
+{
+  int i;
+  if (cmd_buffer.s != CMD_BUF_SIZE)
+  {
+    for (i = 0; i < (input.e - input.w) % INPUT_BUF; i++)
+    {
+      if (input.buf[(i + input.w) % INPUT_BUF] != END_OF_LINE || input.buf[(i + input.w) % INPUT_BUF] != C('D'))
+        cmd_buffer.buf[cmd_buffer.w][i] = input.buf[i + input.w];
+    }
+    cmd_buffer.buf[cmd_buffer.w][i] = END_OF_ARRAY;
+    cmd_buffer.s++;
+  }
+  else
+  {
+    for (i = 0; i < (input.e - input.w) % INPUT_BUF; i++)
+    {
+      if (input.buf[(i + input.w) % INPUT_BUF] != END_OF_LINE || input.buf[(i + input.w) % INPUT_BUF] != C('D'))
+        cmd_buffer.buf[cmd_buffer.r][i] = input.buf[i + input.w];
+    }
+    cmd_buffer.buf[cmd_buffer.r][i] = END_OF_ARRAY;
+    cmd_buffer.r++;
+    cmd_buffer.r %= 10;
+  }
+  cmd_buffer.w++;
+  cmd_buffer.w %= 10;
+  cmd_buffer.pointer = cmd_buffer.w;
+  cmd_buffer.movement = 0;
+}
+
+void loadCommand()
+{
+  for (int i = 0;; i++)
+  {
+    if (cmd_buffer.buf[cmd_buffer.pointer][i] == END_OF_ARRAY)
+    {
+      input.pointer %= INPUT_BUF;
+      input.e %= INPUT_BUF;
+      break;
+    }
+    input.buf[(input.w + i) % INPUT_BUF] = cmd_buffer.buf[cmd_buffer.pointer][i];
+    input.e++;
+    input.pointer++;
+  }
+}
 
 void consoleintr(int (*getc)(void))
 {
   int c, doprocdump = 0;
-  char buffer[MAX_COMMAND_LENGTH];
 
   acquire(&cons.lock);
-  while((c = getc()) >= 0){
-    switch(c){
-
-    case C('P'):  // Process listing.
+  while ((c = getc()) >= 0)
+  {
+    switch (c)
+    {
+    case C('P'): // Process listing.
+      // procdump() locks cons.lock indirectly; invoke later
       doprocdump = 1;
-      //procdump();
       break;
-    case C('U'):  // Kill line.
-      while(input.e != input.w &&
-            input.buf[(input.e-1) % INPUT_BUF] != '\n'){
-        input.e--;
-        consputc(BACKSPACE);
-      }
+    case C('U'): // Kill line.
+      consputc(CURSORRESET);
+      input.pointer = input.e = input.w;
       break;
-    case C('H'): case '\x7f':  // Backspace
-      if(input.e != input.w){
-        input.e--;
-        consputc(BACKSPACE);
-      }
-      break;
-
-    case C('S'):  // Backspace
-        capturing = 1; // Start capturing
-        input_index = 0; // Reset index
-        cprintf("Capturing input... (type your input)\n");
-      break;
-
-
-      case C('F'):
-        capturing = 0;
-        cprintf("\nPasted input: ");
-        for (int i = 0; i < input_index; i++) {
-            cprintf("%c", input_buffer[i]); // Print captured input
+    case C('H'):
+    case '\x7f': // Backspace
+      if (input.pointer != input.w)
+      {
+        if (input.e != input.pointer)
+        {
+          shiftLeft();
+          consputc(SHIFTLEFT);
         }
-        cprintf("\n");
-        break;
-
-    case KEY_LF:
-      if(input.pos > input.r){  
-        input.pos --;
-        back_counter += 1;
-        vga_move_back_cursor();
+        else
+        {
+          consputc(BACKSPACE);
+        }
+        input.e--;
+        input.pointer--;
       }
+      break;
+    case KEY_LF:
+      if (input.pointer != input.w)
+      {
+        input.pointer--;
+        consputc(CURSORBACK);
+      }
+      break;
+    case C('L'):
+      consputc(CLEAR);
+      input.e = input.w;
+      input.pointer = input.w;
+      consputc('$');
+      consputc(' ');
       break;
     case KEY_RT:
-      if(input.pos < input.e){   // cannot beyond most left character
-        input.pos ++; // move back one
-        back_counter -= 1;
-        vga_move_forward_cursor();
+      if (input.pointer != input.e)
+      {
+        input.pointer++;
+        consputc(CURSORFORWARD);
+      }
+      break;
+
+    case ARROW_UP:
+      if (CAN_ARROW_UP && cmd_buffer.s > 0)
+      {
+        input.e = input.w;
+        input.pointer = input.w;
+        if (cmd_buffer.pointer == 0)
+        {
+          cmd_buffer.pointer = 9;
+        }
+        else
+        {
+          cmd_buffer.pointer--;
+        }
+        cmd_buffer.movement++;
+        cmd_buffer.pointer %= CMD_BUF_SIZE;
+        loadCommand();
+        consputc(ARROW_UP);
+      }
+      break;
+
+    case ARROW_DOWN:
+      if (cmd_buffer.movement != 0)
+      {
+        input.e = input.w;
+        input.pointer = input.w;
+        if (CAN_ARROW_DOWN && cmd_buffer.s > 0)
+        {
+          cmd_buffer.pointer++;
+          cmd_buffer.movement--;
+          cmd_buffer.pointer %= CMD_BUF_SIZE;
+          loadCommand();
+          consputc(ARROW_DOWN);
+        }
+        else
+        {
+          if (cmd_buffer.movement - 1 >= 0)
+          {
+            cmd_buffer.movement--;
+            cmd_buffer.pointer = 1;
+          }
+          consputc(CURSORRESET);
+        }
       }
       break;
     default:
-      if(c != 0 && input.e-input.r < INPUT_BUF){
-            if (capturing) {
-              if (input_index < MAX_INPUT_SIZE - 1) { // Avoid overflow
-                  input_buffer[input_index++] = c; // Store character
-              }
-              // Optionally, you can echo the characters typed
-              if (c != '\n') { // Don't echo newline
-                  cprintf("%c", c); // Echo back the character
-              } else {
-                  cprintf("\n"); // Handle newline
-              }
-            }
-        uartputc('-');
-        uartputc(c); 
-
-        c = (c == '\r') ? '\n' : c;
-        if(c == '\n' || c == C('D') || input.e == input.r+INPUT_BUF){
-
-          input.buf[input.e++ % INPUT_BUF] = c;
-          consputc(c);
-
-          back_counter = 0;
-
-          for(int i=input.w, k=0; i < input.e-1; i++, k++){
-            buffer[k] = input.buf[i % INPUT_BUF];
-          }
-          buffer[(input.e-1-input.w) % INPUT_BUF] = '\0';
-
-          addHistory(buffer);
+      if (c != 0 && input.e - input.r < INPUT_BUF)
+      {
+        c = (c == '\r') ? END_OF_LINE : c;
+        if (c == END_OF_LINE || c == C('D') || input.e == input.r + INPUT_BUF)
+        {
+          input.pointer = input.e;
+          recordCommand();
+        }
+        if (input.e != input.pointer)
+        {
+          shiftRight();
+          consputc(SHIFTRIGHT);
+        }
+        input.buf[input.pointer++ % INPUT_BUF] = c;
+        input.e++;
+        consputc(c);
+        if (c == END_OF_LINE || c == C('D') || input.e == input.r + INPUT_BUF)
+        {
           input.w = input.e;
-          input.pos = input.e;
           wakeup(&input.r);
-
-        }else{
-          
-          if(back_counter == 0){
-
-            input.buf[input.e++ % INPUT_BUF] = c;
-            input.pos ++;
-
-            consputc(c);
-          
-          }else{
-
-            for(int k=input.e; k >= input.pos; k--){
-              input.buf[(k + 1) % INPUT_BUF] = input.buf[k % INPUT_BUF];
-            }
-
-            input.buf[input.pos % INPUT_BUF] = c;
-
-            input.e++;
-            input.pos++;
-
-            vga_insert_char(c, back_counter);
-          }
         }
       }
       break;
     }
   }
   release(&cons.lock);
-    if (doprocdump)
+  if (doprocdump)
   {
     procdump(); // now call procdump() wo. cons.lock held
   }
-
 }
 
-int
-consoleread(struct inode *ip, char *dst, int n)
+int consoleread(struct inode *ip, char *dst, int n)
 {
   uint target;
   int c;
@@ -440,18 +497,23 @@ consoleread(struct inode *ip, char *dst, int n)
   iunlock(ip);
   target = n;
   acquire(&cons.lock);
-  while(n > 0){
-    while(input.r == input.w){
-      if(myproc()->killed){
-        release(&input.lock);
+  while (n > 0)
+  {
+    while (input.r == input.w)
+    {
+      if (myproc()->killed)
+      {
+        release(&cons.lock);
         ilock(ip);
         return -1;
       }
       sleep(&input.r, &cons.lock);
     }
     c = input.buf[input.r++ % INPUT_BUF];
-    if(c == C('D')){  // EOF
-      if(n < target){
+    if (c == C('D'))
+    { // EOF
+      if (n < target)
+      {
         // Save ^D for next time, to make sure
         // caller gets a 0-byte result.
         input.r--;
@@ -460,7 +522,7 @@ consoleread(struct inode *ip, char *dst, int n)
     }
     *dst++ = c;
     --n;
-    if(c == '\n')
+    if (c == END_OF_LINE)
       break;
   }
   release(&cons.lock);
@@ -469,14 +531,13 @@ consoleread(struct inode *ip, char *dst, int n)
   return target - n;
 }
 
-int
-consolewrite(struct inode *ip, char *buf, int n)
+int consolewrite(struct inode *ip, char *buf, int n)
 {
   int i;
 
   iunlock(ip);
   acquire(&cons.lock);
-  for(i = 0; i < n; i++)
+  for (i = 0; i < n; i++)
     consputc(buf[i] & 0xff);
   release(&cons.lock);
   ilock(ip);
@@ -484,8 +545,7 @@ consolewrite(struct inode *ip, char *buf, int n)
   return n;
 }
 
-void
-consoleinit(void)
+void consoleinit(void)
 {
   initlock(&cons.lock, "console");
 
@@ -495,4 +555,3 @@ consoleinit(void)
 
   ioapicenable(IRQ_KBD, 0);
 }
-
