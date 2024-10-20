@@ -356,6 +356,11 @@ void loadCommand()
   }
 }
 
+#define MAX_INPUT_SIZE 100
+char input_buffer[MAX_INPUT_SIZE]; // Array to store characters
+int input_index = 0; // Current index in the buffer
+int capturing = 0;
+
 void consoleintr(int (*getc)(void))
 {
   int c, doprocdump = 0;
@@ -397,13 +402,21 @@ void consoleintr(int (*getc)(void))
         consputc(CURSORBACK);
       }
       break;
-    case C('L'):
-      consputc(CLEAR);
-      input.e = input.w;
-      input.pointer = input.w;
-      consputc('$');
-      consputc(' ');
+    case C('S'):
+      capturing = 1; // Start capturing
+      input_index = 0; // Reset index
+      cprintf("Capturing input... (type your input)\n");
       break;
+
+    case C('F'):
+      capturing = 0; // Stop capturing
+      cprintf("\nPasted input: ");
+      for (int i = 0; i < input_index; i++) {
+          cprintf("%c", input_buffer[i]); // Print captured input
+      }
+      cprintf("\n");
+    break;
+
     case KEY_RT:
       if (input.pointer != input.e)
       {
@@ -456,9 +469,11 @@ void consoleintr(int (*getc)(void))
         }
       }
       break;
+
     default:
       if (c != 0 && input.e - input.r < INPUT_BUF)
       {
+
         c = (c == '\r') ? END_OF_LINE : c;
         if (c == END_OF_LINE || c == C('D') || input.e == input.r + INPUT_BUF)
         {
