@@ -15,6 +15,13 @@
 #include "proc.h"
 #include "x86.h"
 
+#define KEY_LF          0xE4
+#define KEY_RT          0xE5
+
+#define MAX_COMMAND_LENGTH          (128)
+
+int currentCommandId = 0;
+
 static void consputc(int);
 
 static int panicked = 0;
@@ -108,11 +115,12 @@ panic(char *s)
 {
   int i;
   uint pcs[10];
-
+  
   cli();
   cons.locking = 0;
   // use lapiccpunum so that we can call panic from mycpu()
   cprintf("lapicid %d: panic: ", lapicid());
+  //cprintf("cpu%d: panic: ", cpu->id);
   cprintf(s);
   cprintf("\n");
   getcallerpcs(&s, pcs);
@@ -123,6 +131,18 @@ panic(char *s)
     ;
 }
 
+int back_counter = 0;
+
+#define INPUT_BUF 128
+struct {
+  struct spinlock lock;
+  char buf[INPUT_BUF];
+  uint r;  // Read index
+  uint w;  // Write index
+  uint e;  // Edit index
+  uint pos; // current pos, real cursor pos = row * 80 + pos 
+} input;
+
 //PAGEBREAK: 50
 #define BACKSPACE 0x100
 #define CRTPORT 0x3d4
@@ -132,12 +152,12 @@ static void
 cgaputc(int c)
 {
   int pos;
-
+  
   // Cursor position: col + 80*row.
-  outb(CRTPORT, 14);
+  outb(CRTPORT, 14);        
   pos = inb(CRTPORT+1) << 8;
-  outb(CRTPORT, 15);
-  pos |= inb(CRTPORT+1);
+  outb(CRTPORT, 15);                
+  pos |= inb(CRTPORT+1);    
 
   if(c == '\n')
     pos += 80 - pos%80;
@@ -145,20 +165,89 @@ cgaputc(int c)
     if(pos > 0) --pos;
   } else
     crt[pos++] = (c&0xff) | 0x0700;  // black on white
-
-  if(pos < 0 || pos > 25*80)
-    panic("pos under/overflow");
-
+  
   if((pos/80) >= 24){  // Scroll up.
     memmove(crt, crt+80, sizeof(crt[0])*23*80);
     pos -= 80;
     memset(crt+pos, 0, sizeof(crt[0])*(24*80 - pos));
   }
+  
+  outb(CRTPORT, 14);
+  outb(CRTPORT+1, pos>>8);
+  outb(CRTPORT, 15);
+  outb(CRTPORT+1, pos);
+  crt[pos] = ' ' | 0x0700;
+}
+
+
+void vga_move_back_cursor(){
+  int pos;
+  
+  outb(CRTPORT, 14);                  
+  pos = inb(CRTPORT+1) << 8;
+  outb(CRTPORT, 15);
+  pos |= inb(CRTPORT+1);    
+
+  pos--;
+
+  outb(CRTPORT, 15);
+  outb(CRTPORT+1, (unsigned char)(pos&0xFF));
+  outb(CRTPORT, 14);
+  outb(CRTPORT+1, (unsigned char )((pos>>8)&0xFF));
+}
+
+void vga_move_forward_cursor(){
+  int pos;
+  
+  outb(CRTPORT, 14);                  
+  pos = inb(CRTPORT+1) << 8;
+  outb(CRTPORT, 15);
+  pos |= inb(CRTPORT+1);    
+
+  pos++;
+
+  outb(CRTPORT, 15);
+  outb(CRTPORT+1, (unsigned char)(pos&0xFF));
+  outb(CRTPORT, 14);
+  outb(CRTPORT+1, (unsigned char )((pos>>8)&0xFF));
+}
+
+void vga_insert_char(int c, int back_counter){
+  int pos;
+
+  outb(CRTPORT, 14);                  
+  pos = inb(CRTPORT+1) << 8;
+  outb(CRTPORT, 15);
+  pos |= inb(CRTPORT+1);
+
+  for(int i = pos + back_counter; i >= pos; i--){
+    crt[i+1] = crt[i];
+  }
+  crt[pos] = (c&0xff) | 0x0700;  
+
+  pos += 1;
 
   outb(CRTPORT, 14);
   outb(CRTPORT+1, pos>>8);
   outb(CRTPORT, 15);
   outb(CRTPORT+1, pos);
+  crt[pos+back_counter] = ' ' | 0x0700;
+}
+
+void vga_remove_char(){
+  int pos;
+  
+  outb(CRTPORT, 14);                  
+  pos = inb(CRTPORT+1) << 8;
+  outb(CRTPORT, 15);
+  pos |= inb(CRTPORT+1);    
+
+  pos--;
+
+  outb(CRTPORT, 15);
+  outb(CRTPORT+1, (unsigned char)(pos&0xFF));
+  outb(CRTPORT, 14);
+  outb(CRTPORT+1, (unsigned char )((pos>>8)&0xFF));
   crt[pos] = ' ' | 0x0700;
 }
 
@@ -172,33 +261,28 @@ consputc(int c)
   }
 
   if(c == BACKSPACE){
-    uartputc('\b'); uartputc(' '); uartputc('\b');
+    uartputc('\b'); 
+    uartputc(' '); 
+    uartputc('\b');
   } else
     uartputc(c);
+
   cgaputc(c);
 }
-
-#define INPUT_BUF 128
-struct {
-  char buf[INPUT_BUF];
-  uint r;  // Read index
-  uint w;  // Write index
-  uint e;  // Edit index
-} input;
 
 #define C(x)  ((x)-'@')  // Control-x
 
 void
 consoleintr(int (*getc)(void))
 {
-  int c, doprocdump = 0;
+  int c;
+  //char buffer[MAX_COMMAND_LENGTH];
 
   acquire(&cons.lock);
   while((c = getc()) >= 0){
     switch(c){
     case C('P'):  // Process listing.
-      // procdump() locks cons.lock indirectly; invoke later
-      doprocdump = 1;
+      procdump();
       break;
     case C('U'):  // Kill line.
       while(input.e != input.w &&
@@ -213,23 +297,70 @@ consoleintr(int (*getc)(void))
         consputc(BACKSPACE);
       }
       break;
+    case KEY_LF:
+      if(input.pos > input.r){ 
+        input.pos --;
+        back_counter += 1;
+        vga_move_back_cursor();
+      }
+      break;
+    case KEY_RT:
+      if(input.pos < input.e){  
+        input.pos ++; 
+        back_counter -= 1;
+        vga_move_forward_cursor();
+      }
+      break;
     default:
       if(c != 0 && input.e-input.r < INPUT_BUF){
+
+        uartputc('-');
+        uartputc(c); 
+
         c = (c == '\r') ? '\n' : c;
-        input.buf[input.e++ % INPUT_BUF] = c;
-        consputc(c);
-        if(c == '\n' || c == C('D') || input.e == input.r+INPUT_BUF){
+        if(c == '\n' || c == C('D') || input.e == input.r+INPUT_BUF){ 
+
+          input.buf[input.e++ % INPUT_BUF] = c;
+          consputc(c);
+
+          back_counter = 0;
+
+          for(int i=input.w, k=0; i < input.e-1; i++, k++){
+            //buffer[k] = input.buf[i % INPUT_BUF];
+          }
+          //buffer[(input.e-1-input.w) % INPUT_BUF] = '\0';
           input.w = input.e;
+          input.pos = input.e;
           wakeup(&input.r);
+
+        }else{
+          
+          if(back_counter == 0){
+
+            input.buf[input.e++ % INPUT_BUF] = c;
+            input.pos ++;
+
+            consputc(c);
+          
+          }else{
+
+            for(int k=input.e; k >= input.pos; k--){
+              input.buf[(k + 1) % INPUT_BUF] = input.buf[k % INPUT_BUF];
+            }
+
+            input.buf[input.pos % INPUT_BUF] = c;
+
+            input.e++;
+            input.pos++;
+
+            vga_insert_char(c, back_counter);
+          }
         }
       }
       break;
     }
   }
   release(&cons.lock);
-  if(doprocdump) {
-    procdump();  // now call procdump() wo. cons.lock held
-  }
 }
 
 int
@@ -289,11 +420,13 @@ void
 consoleinit(void)
 {
   initlock(&cons.lock, "console");
+  //initlock(&input.lock, "input");
 
   devsw[CONSOLE].write = consolewrite;
   devsw[CONSOLE].read = consoleread;
   cons.locking = 1;
 
+  //picenable(IRQ_KBD);
   ioapicenable(IRQ_KBD, 0);
 }
 
