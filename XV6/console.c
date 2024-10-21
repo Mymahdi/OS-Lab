@@ -15,11 +15,6 @@
 #include "proc.h"
 #include "x86.h"
 #include <stdio.h>
-#include "types.h"
-#include "stat.h"
-#include "user.h"
-#include "string.h"
-#include "expr_eval.h"  // Include the header for evaluate_expression
 
 
 #define KEY_UP          0xE2
@@ -554,7 +549,7 @@ int consoleread(struct inode *ip, char *dst, int n)
 int consolewrite(struct inode *ip, char *buf, int n)
 {
   int i;
-  evaluate_expression(buf);
+  //evaluate_expression(buf);
   iunlock(ip);
   acquire(&cons.lock);
   for (i = 0; i < n; i++)

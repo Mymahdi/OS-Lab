@@ -895,7 +895,7 @@ int consolewrite(struct inode *ip, char *buf, int n)
 801008e9:	53                   	push   %ebx
 801008ea:	83 ec 18             	sub    $0x18,%esp
   int i;
-
+  //evaluate_expression(buf);
   iunlock(ip);
 801008ed:	ff 75 08             	pushl  0x8(%ebp)
 {
