@@ -6,6 +6,10 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "proc.h"
+// #include "cpu.h"  // Include cpu.h to access 'struct cpu'
+
+// Declare totalSysCalls as an external variable (defined in trap.c)
+extern uint totalSysCalls;
 
 int
 sys_fork(void)
@@ -77,8 +81,7 @@ sys_sleep(void)
   return 0;
 }
 
-// return how many clock tick interrupts have occurred
-// since start.
+// Return how many clock tick interrupts have occurred since start.
 int
 sys_uptime(void)
 {
@@ -88,4 +91,27 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+// New system call to return the total number of system calls executed across all CPUs
+int
+sys_getsyscalls(void)
+{
+  uint total = 0;
+  int i;
+
+  // Iterate over all CPUs and sum up the SysCallCounter
+  for (i = 0; i < ncpu; i++) {
+    struct cpu *cpu = &cpus[i];  // Accessing the current CPU
+    total += cpu->SysCallCounter;  // Adding up the SysCallCounter from each CPU
+  }
+
+  // Compare with the global totalSysCalls variable
+  if (total != totalSysCalls) {
+    cprintf("Error: Total system calls mismatch!\n");
+  } else {
+    cprintf("Total system calls across all CPUs: %d\n", total);
+  }
+
+  return total;  // Return the total system calls
 }

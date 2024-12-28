@@ -34,7 +34,7 @@ idtinit(void)
 
 //PAGEBREAK: 41
 // Declare the global totalSysCalls counter at the top of trap.c
-static uint totalSysCalls = 0;  // Tracks the total number of system calls
+ uint totalSysCalls = 0;  // Tracks the total number of system calls
 
 void
 trap(struct trapframe *tf)
