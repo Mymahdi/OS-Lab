@@ -7,15 +7,11 @@
 #include "x86.h"
 #include "syscall.h"
 
-// User code makes a system call with INT T_SYSCALL.
-// System call number in %eax.
-// Arguments on the stack, from the user call to the C
-// library system call function. The saved user %esp points
-// to a saved program counter, and then the first argument.
+// External declaration for the totalSysCalls variable in trap.c
+extern uint totalSysCalls;  
 
 // Fetch the int at addr from the current process.
-int
-fetchint(uint addr, int *ip)
+int fetchint(uint addr, int *ip)
 {
   struct proc *curproc = myproc();
 
@@ -28,8 +24,7 @@ fetchint(uint addr, int *ip)
 // Fetch the nul-terminated string at addr from the current process.
 // Doesn't actually copy the string - just sets *pp to point at it.
 // Returns length of string, not including nul.
-int
-fetchstr(uint addr, char **pp)
+int fetchstr(uint addr, char **pp)
 {
   char *s, *ep;
   struct proc *curproc = myproc();
@@ -46,8 +41,7 @@ fetchstr(uint addr, char **pp)
 }
 
 // Fetch the nth 32-bit system call argument.
-int
-argint(int n, int *ip)
+int argint(int n, int *ip)
 {
   return fetchint((myproc()->tf->esp) + 4 + 4*n, ip);
 }
@@ -55,8 +49,7 @@ argint(int n, int *ip)
 // Fetch the nth word-sized system call argument as a pointer
 // to a block of memory of size bytes.  Check that the pointer
 // lies within the process address space.
-int
-argptr(int n, char **pp, int size)
+int argptr(int n, char **pp, int size)
 {
   int i;
   struct proc *curproc = myproc();
@@ -73,8 +66,8 @@ argptr(int n, char **pp, int size)
 // Check that the pointer is valid and the string is nul-terminated.
 // (There is no shared writable memory, so the string can't change
 // between this check and being used by the kernel.)
-int
-argstr(int n, char **pp)
+// Returns 0 if the fetch is successful, or -1 if not.
+int argstr(int n, char **pp)
 {
   int addr;
   if(argint(n, &addr) < 0)
@@ -82,6 +75,7 @@ argstr(int n, char **pp)
   return fetchstr(addr, pp);
 }
 
+// System call table definition, includes all syscalls
 extern int sys_chdir(void);
 extern int sys_close(void);
 extern int sys_dup(void);
@@ -105,37 +99,50 @@ extern int sys_write(void);
 extern int sys_uptime(void);
 
 static int (*syscalls[])(void) = {
-[SYS_fork]    sys_fork,
-[SYS_exit]    sys_exit,
-[SYS_wait]    sys_wait,
-[SYS_pipe]    sys_pipe,
-[SYS_read]    sys_read,
-[SYS_kill]    sys_kill,
-[SYS_exec]    sys_exec,
-[SYS_fstat]   sys_fstat,
-[SYS_chdir]   sys_chdir,
-[SYS_dup]     sys_dup,
-[SYS_getpid]  sys_getpid,
-[SYS_sbrk]    sys_sbrk,
-[SYS_sleep]   sys_sleep,
-[SYS_uptime]  sys_uptime,
-[SYS_open]    sys_open,
-[SYS_write]   sys_write,
-[SYS_mknod]   sys_mknod,
-[SYS_unlink]  sys_unlink,
-[SYS_link]    sys_link,
-[SYS_mkdir]   sys_mkdir,
-[SYS_close]   sys_close,
+  [SYS_fork]    sys_fork,
+  [SYS_exit]    sys_exit,
+  [SYS_wait]    sys_wait,
+  [SYS_pipe]    sys_pipe,
+  [SYS_read]    sys_read,
+  [SYS_kill]    sys_kill,
+  [SYS_exec]    sys_exec,
+  [SYS_fstat]   sys_fstat,
+  [SYS_chdir]   sys_chdir,
+  [SYS_dup]     sys_dup,
+  [SYS_getpid]  sys_getpid,
+  [SYS_sbrk]    sys_sbrk,
+  [SYS_sleep]   sys_sleep,
+  [SYS_uptime]  sys_uptime,
+  [SYS_open]    sys_open,
+  [SYS_write]   sys_write,
+  [SYS_mknod]   sys_mknod,
+  [SYS_unlink]  sys_unlink,
+  [SYS_link]    sys_link,
+  [SYS_mkdir]   sys_mkdir,
+  [SYS_close]   sys_close,
 };
 
-void
-syscall(void)
+void syscall(void)
 {
   int num;
   struct proc *curproc = myproc();
-
+  struct cpu *cpu = mycpu(); 
   num = curproc->tf->eax;
+
+  // Handle system call number
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
+    
+    if (num == SYS_write) {
+      cpu->SysCallCounter += 2;
+      totalSysCalls += 2;
+    } else if (num == SYS_open) {
+      cpu->SysCallCounter += 3;  
+      totalSysCalls += 3;
+    } else {
+      cpu->SysCallCounter += 1;  
+      totalSysCalls += 1;
+    }
+
     curproc->tf->eax = syscalls[num]();
   } else {
     cprintf("%d %s: unknown sys call %d\n",
