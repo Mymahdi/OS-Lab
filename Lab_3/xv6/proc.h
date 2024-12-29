@@ -8,11 +8,12 @@ struct cpu {
   int ncli;                    // Depth of pushcli nesting.
   int intena;                  // Were interrupts enabled before pushcli?
   struct proc *proc;           // The process running on this cpu or null
-  struct proc *RRproc;
+  struct proc *RR_proc;           
   short RR;
   short SJF;
   short FCFS;
   short ticks;
+
 };
 
 extern struct cpu cpus[NCPU];
@@ -54,11 +55,11 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
-  int Age;                    
-  int QueueNumber;
-  int EnterTime;
-  int BurstTime;
-  int Confidence;
+  int age;                    
+  int queue_number;
+  int enter_time;
+  int confidence;
+  int burst_time;
 };
 
 // Process memory is laid out contiguously, low addresses first:

@@ -5,6 +5,6 @@
 int
 main(void)
 {
-  print_processes_infos();
+  print_info();
   exit();
 }

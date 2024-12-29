@@ -94,13 +94,13 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
-  p->BurstTime = 2;
-  p->Confidence = 50;
-  p->EnterTime = ticks;
-  p->QueueNumber = FIFO;
+  p->burst_time = 2;
+  p->confidence = 50;
+  p->enter_time = ticks;
+  p->queue_number = FIFO;
   if (p->pid <= 2)
-    p->QueueNumber = RR;
-  cprintf("Burst time: %d\n", p->BurstTime);
+    p->queue_number = RR;
+  cprintf("Burst time: %d\n", p->burst_time);
 
   release(&ptable.lock);
 
@@ -339,14 +339,14 @@ void sort_processes(void)
   struct proc *arg_min;
   for (p = ptable.proc; p < &ptable.proc[NPROC]; p++)
   {
-    if (p->state != RUNNABLE || p->QueueNumber != SJF)
+    if (p->state != RUNNABLE || p->queue_number != SJF)
       continue;
     arg_min = p;
     for (struct proc *i = p + 1; i < &ptable.proc[NPROC]; i++)
     {
-      if (i->state != RUNNABLE || i->QueueNumber != SJF)
+      if (i->state != RUNNABLE || i->queue_number != SJF)
         continue;
-      if (arg_min->BurstTime > i->BurstTime && arg_min->pid != i->pid)
+      if (arg_min->burst_time > i->burst_time && arg_min->pid != i->pid)
       {
         arg_min = i;
       }
@@ -385,7 +385,7 @@ void handle_change_queue(void)
   {
     if (p->state != RUNNABLE)
       continue;
-    if (p->QueueNumber != queue)
+    if (p->queue_number != queue)
       continue;
     is_empty = 0;
   }
@@ -398,7 +398,7 @@ void handle_change_queue(void)
       mycpu()->RR = 0;
       mycpu()->SJF = 2;
       mycpu()->FCFS = 0;
-      mycpu()->RRproc = ptable.proc;
+      mycpu()->RR_proc = ptable.proc;
     }
     else if (queue == SJF)
     {
@@ -422,16 +422,16 @@ void RR_scheduler(void)
   c->proc = 0;
   for (int i = 0; i < NPROC; i++)
   {
-    p = ((mycpu()->RRproc - &ptable.proc[0]) + i) % NPROC + &ptable.proc[0];
-    if (p->state != RUNNABLE || p->QueueNumber != RR)
+    p = ((mycpu()->RR_proc - &ptable.proc[0]) + i) % NPROC + &ptable.proc[0];
+    if (p->state != RUNNABLE || p->queue_number != RR)
       continue;
     c->proc = p;
     switchuvm(p);
     p->state = RUNNING;
-    p->Age = 0;
+    p->age = 0;
     swtch(&(c->scheduler), p->context);
     switchkvm();
-    mycpu()->RRproc = p + 1;
+    mycpu()->RR_proc = p + 1;
 
     c->proc = 0;
     return;
@@ -447,21 +447,21 @@ void SJF_scheduler(void)
 
   for (p = ptable.proc; p < &ptable.proc[NPROC]; p++)
   {
-    if (p->state != RUNNABLE || p->QueueNumber != SJF)
+    if (p->state != RUNNABLE || p->queue_number != SJF)
       continue;
 
     int random = ticks * (p->pid + 1) + ((int)p->name[0] + 1) * 357 + 666;
     random = ((random * random) % 100);
 
     // cprintf("Random number: %d for pid: %d\n", random, p->pid);
-    if (random > p->Confidence)
+    if (random > p->confidence)
       continue;
     // cprintf("Random number: %d for pid: %d\n", random, p->pid);
 
     c->proc = p;
     switchuvm(p);
     p->state = RUNNING;
-    p->Age = 0;
+    p->age = 0;
 
     swtch(&(c->scheduler), p->context);
     switchkvm();
@@ -481,7 +481,7 @@ void FCFS_scheduler(void)
   int iter = 0;
   for (p = ptable.proc; p < &ptable.proc[NPROC]; p++)
   {
-    if (p->state != RUNNABLE || p->QueueNumber != FIFO)
+    if (p->state != RUNNABLE || p->queue_number != FIFO)
       continue;
     iter += 1;
     if (iter == 1)
@@ -491,7 +491,7 @@ void FCFS_scheduler(void)
     }
     else
     {
-      if (p->EnterTime < first->EnterTime)
+      if (p->enter_time < first->enter_time)
       {
         first = p;
         continue;
@@ -511,7 +511,7 @@ void FCFS_scheduler(void)
 
   switchuvm(first);
   first->state = RUNNING;
-  p->Age = 0;
+  p->age = 0;
 
   swtch(&(c->scheduler), first->context);
   switchkvm();
@@ -737,10 +737,10 @@ void update_age(void)
   {
     if (p->state != RUNNABLE || p->pid < 3)
     {
-      p->Age = 0;
+      p->age = 0;
       continue;
     }
-    p->Age++;
+    p->age++;
   }
   release(&ptable.lock);
 }
@@ -751,12 +751,12 @@ void update_queue_number(void)
   for (struct proc *p = ptable.proc; p < &ptable.proc[NPROC]; p++)
   {
     // TODO 80 -> 800
-    if (p->QueueNumber == RR || p->Age < 80 || p->pid < 3)
+    if (p->queue_number == RR || p->age < 80 || p->pid < 3)
       continue;
-    p->QueueNumber++;
-    p->Age = 0;
-    p->EnterTime = ticks;
-    cprintf("Process %d moved to queue %d\n", p->pid, p->QueueNumber);
+    p->queue_number++;
+    p->age = 0;
+    p->enter_time = ticks;
+    cprintf("Process %d moved to queue %d\n", p->pid, p->queue_number);
   }
   release(&ptable.lock);
 }
@@ -768,8 +768,8 @@ void update_ticks(void)
   {
     if (p->state != RUNNABLE || p->pid < 3)
       continue;
-    p->BurstTime--;
-    cprintf("Burst time for %d: %d\n", p->pid, p->BurstTime);
+    p->burst_time--;
+    cprintf("Burst time for %d: %d\n", p->pid, p->burst_time);
   }
   release(&ptable.lock);
 }
@@ -793,8 +793,8 @@ int sys_init_estimations(void)
   {
     if (p->pid == pid)
     {
-      p->BurstTime = burst_time;
-      p->Confidence = confidence;
+      p->burst_time = burst_time;
+      p->confidence = confidence;
       break;
     }
   }
@@ -815,7 +815,7 @@ int sys_change_queue(void)
   {
     if (p->pid == pid)
     {
-      p->QueueNumber = queue_num;
+      p->queue_number = queue_num;
       break;
     }
   }
@@ -884,21 +884,21 @@ sys_print_info(void)
         cprintf("%s", state);
         printspaces(columns[2] - strlen(state));
         
-        cprintf("%d", p->QueueNumber);
-        printspaces(columns[3] - digitcount(p->QueueNumber));
+        cprintf("%d", p->queue_number);
+        printspaces(columns[3] - digitcount(p->queue_number));
         
-        cprintf("%d", p->BurstTime);
-        printspaces(columns[4] - digitcount(p->BurstTime));
+        cprintf("%d", p->burst_time);
+        printspaces(columns[4] - digitcount(p->burst_time));
         
-        cprintf("%d", p->Confidence);
-        printspaces(columns[5] - digitcount(p->Confidence));
+        cprintf("%d", p->confidence);
+        printspaces(columns[5] - digitcount(p->confidence));
         
-        cprintf("%d", p->Age);
-        printspaces(columns[6] - digitcount(p->Age));
+        cprintf("%d", p->age);
+        printspaces(columns[6] - digitcount(p->age));
         
 
-        cprintf("%d", p->EnterTime);
-        printspaces(columns[7] - digitcount(p->EnterTime));
+        cprintf("%d", p->enter_time);
+        printspaces(columns[7] - digitcount(p->enter_time));
         
         cprintf("\n");
     }

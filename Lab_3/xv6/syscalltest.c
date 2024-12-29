@@ -8,7 +8,7 @@ void print_separator() {
 
 void test_init_estimations(int pid) {
     printf(1, "Testing init_estimations syscall:\n");
-
+    
     // Test case 1: Valid inputs
     int result = init_estimations(pid, 50, 75);
     if(result == 0) {
@@ -38,7 +38,7 @@ void test_init_estimations(int pid) {
 
 void test_change_queue(int pid) {
     printf(1, "Testing change_queue syscall:\n");
-
+    
     // Test moving to different queues
     int queues[] = {0, 1, 2};
     for(int i = 0; i < 3; i++) {
@@ -72,7 +72,7 @@ int main(int argc, char *argv[]) {
 
     // Create a child process for additional testing
     int child_pid = fork();
-
+    
     if(child_pid < 0) {
         printf(1, "Fork failed\n");
         exit();
@@ -82,23 +82,23 @@ int main(int argc, char *argv[]) {
         // Child process
         printf(1, "Child process (PID: %d) tests:\n", getpid());
         print_separator();
-
+        
         // Test syscalls in child process
         test_init_estimations(getpid());
         test_change_queue(getpid());
         test_print_info();
-
+        
         exit();
     } else {
         // Parent process
         printf(1, "Parent process (PID: %d) tests:\n", pid);
         print_separator();
-
+        
         // Test syscalls in parent process
         test_init_estimations(pid);
         test_change_queue(pid);
         test_print_info();
-
+        
         // Wait for child to finish
         wait();
     }

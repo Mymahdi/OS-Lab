@@ -107,6 +107,7 @@ extern int sys_init_estimations(void);
 extern int sys_change_queue(void);
 extern int sys_print_info(void);
 
+
 static int (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
 [SYS_exit]    sys_exit,

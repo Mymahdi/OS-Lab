@@ -52,9 +52,6 @@ static void
 mpmain(void)
 {
   cprintf("cpu%d: starting %d\n", cpuid(), cpuid());
-  // cprintf("Mahdi Khesali 810100134\n");
-  // cprintf("Ali Dadashi 810100138\n");
-  // cprintf("MohammadMahdi Davarzani 810100140\n");
   idtinit();       // load idt register
   xchg(&(mycpu()->started), 1); // tell startothers() we're up
   scheduler();     // start running processes
