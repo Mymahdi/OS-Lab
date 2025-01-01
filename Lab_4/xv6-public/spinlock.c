@@ -9,6 +9,8 @@
 #include "proc.h"
 #include "spinlock.h"
 
+#define NULL ((void *)0)
+
 void
 initlock(struct spinlock *lk, char *name)
 {
@@ -124,3 +126,42 @@ popcli(void)
     sti();
 }
 
+void initreentrantlock(struct reentrantlock *lk, char *name) {
+  initlock(&lk->lock, name);  // Initialize the underlying spinlock
+  lk->owner = NULL;           // No owner initially
+  lk->recursion = 0;          // Recursion depth is 0
+}
+
+
+void acquirereentrantlock(struct reentrantlock *lk) {
+  struct proc *current = myproc();
+
+  // If the current process already owns the lock, increase recursion depth
+  if (lk->owner == current) {
+    lk->recursion++;
+    return;
+  }
+
+  // Acquire the underlying spinlock
+  acquire(&lk->lock);
+
+  // Set the owner to the current process and initialize recursion depth
+  lk->owner = current;
+  lk->recursion = 1;
+}
+
+void releasereentrantlock(struct reentrantlock *lk) {
+  // Ensure the current process owns the lock
+  if (lk->owner != myproc()) {
+    panic("releasereentrantlock: not the owner");
+  }
+
+  // Decrease the recursion depth
+  lk->recursion--;
+
+  // If recursion depth reaches 0, release the underlying spinlock
+  if (lk->recursion == 0) {
+    lk->owner = NULL;  // Clear the owner
+    release(&lk->lock);
+  }
+}
