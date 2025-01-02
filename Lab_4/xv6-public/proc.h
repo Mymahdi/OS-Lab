@@ -1,3 +1,7 @@
+#include "x86.h"
+#include "param.h"
+#include"mmu.h"
+
 // Per-CPU state
 struct cpu {
   uchar apicid;                // Local APIC ID

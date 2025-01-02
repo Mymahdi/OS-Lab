@@ -181,9 +181,14 @@ UPROGS=\
 	_usertests\
 	_wc\
 	_zombie\
-	_reentranttest\
+	_reentranttest \
 
-_reentranttest: user/reentranttest.c
+_reentranttest: reentranttest.o reentrantlock.o ulib.o usys.o printf.o umalloc.o
+    ld -m elf_i386 -N -e main -Ttext 0 -o _reentranttest reentranttest.o reentrantlock.o ulib.o usys.o printf.o umalloc.o
+
+reentrantlock.o: reentrantlock.c
+    $(CC) -m32 -fno-pic -static -fno-builtin -fno-strict-aliasing -O2 -Wall -MD -ggdb -fno-omit-frame-pointer -fno-stack-protector -fno-pie -c reentrantlock.c -o reentrantlock.o
+
 
 
 fs.img: mkfs README $(UPROGS)
