@@ -182,6 +182,7 @@ UPROGS=\
 	_wc\
 	_zombie\
 	_reentranttest \
+	
 
 _reentranttest: reentranttest.o reentrantlock.o ulib.o usys.o printf.o umalloc.o
     ld -m elf_i386 -N -e main -Ttext 0 -o _reentranttest reentranttest.o reentrantlock.o ulib.o usys.o printf.o umalloc.o
