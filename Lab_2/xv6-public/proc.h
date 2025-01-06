@@ -1,6 +1,5 @@
 // Per-CPU state
-#define NUMBER_OF_SYSCALLS 27
-
+#define NUM_SYSCALLS 27
 struct cpu {
   uchar apicid;                // Local APIC ID
   struct context *scheduler;   // swtch() here to enter scheduler
@@ -51,15 +50,13 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
-  int invoke_count[NUMBER_OF_SYSCALLS];
+  int syscall_count[NUM_SYSCALLS];
 };
-
+int sort_syscalls(int pid);
+int get_most_invoked_syscall_impl(int pid);
+int list_all_processes_impl(void);
 // Process memory is laid out contiguously, low addresses first:
 //   text
 //   original data and bss
 //   fixed-size stack
 //   expandable heap
-
-int sort_syscalls(int pid);
-int get_most_invoked_syscall(int pid);
-int list_all_processes(void);

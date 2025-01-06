@@ -81,7 +81,6 @@ allocproc(void)
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == UNUSED)
       goto found;
-
   release(&ptable.lock);
   return 0;
 
@@ -112,6 +111,10 @@ found:
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
 
+  for(int i =0;i<NUM_SYSCALLS;i++){
+    p->syscall_count[i]=0;
+  }
+  
   return p;
 }
 
@@ -516,8 +519,7 @@ procdump(void)
   char *state;
   uint pc[10];
 
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-  {
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->state == UNUSED)
       continue;
     if(p->state >= 0 && p->state < NELEM(states) && states[p->state])
@@ -533,78 +535,80 @@ procdump(void)
     cprintf("\n");
   }
 }
-
 int sort_syscalls(int pid){
   struct proc *p;
   int i;
   acquire(&ptable.lock);
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-  {
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->pid == pid){  
-      int syscall_invoke[NUMBER_OF_SYSCALLS];
-      for (i = 0; i < NUMBER_OF_SYSCALLS; i++) 
-      {        
-        syscall_invoke[i] = p->invoke_count[i];
-      }
-      for (i = 0; i < NUMBER_OF_SYSCALLS-1; i++) 
-      {      
-        cprintf("Syscall %d invoked %d times\n", i+1, syscall_invoke[i]);        
-      }
-      release(&ptable.lock);
-      return 0;
+    int syscall_data[NUM_SYSCALLS];
+
+
+    for (i = 0; i < NUM_SYSCALLS; i++) {
+        
+        syscall_data[i] = p->syscall_count[i];
     }
-  }
+
+    
+
+    for (i = 0; i < NUM_SYSCALLS-1; i++) {
+        
+            cprintf("Syscall %d: %d times\n", i+1, syscall_data[i]);
+        
+    }
+    release(&ptable.lock);
+    return 0;
+}
+
+      }
   release(&ptable.lock);
   return -1;
 }
 
+
 int
-get_most_invoked_syscall(int pid)
+get_most_invoked_syscall_impl(int pid)
 {
   struct proc *p;
-  int max = -1;
-  int most_invoked_syscall = -1;
+  int max_count = -1;
+  int most_called_syscall = -1;
   
   acquire(&ptable.lock);
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) 
-  {
-    if(p->pid == pid) 
-    {
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p->pid == pid) {
       // Find syscall with maximum count
-      for(int i = 0; i < NUMBER_OF_SYSCALLS; i++) 
-      {
-        if(p->invoke_count[i] > max) 
-        {
-          max = p->invoke_count[i];
-          most_invoked_syscall = i;
+      for(int i = 0; i < NUM_SYSCALLS; i++) {
+        if(p->syscall_count[i] > max_count) {
+          max_count = p->syscall_count[i];
+          most_called_syscall = i;
         }
       }
       break;
     }
   }
   release(&ptable.lock);
-  return most_invoked_syscall;
+  
+  return most_called_syscall;
 }
 
 int
-list_all_processes(void)
+list_all_processes_impl(void)
 {
   struct proc *p;
   
   acquire(&ptable.lock);
-  cprintf("Process ID\tTotal Syscall Invokes\n");
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) 
-  {
-    if(p->state != UNUSED) 
-    {
-      int total_syscall_invokes = 0;
-      for(int i = 0; i < NUMBER_OF_SYSCALLS; i++) 
-      {
-        total_syscall_invokes += p->invoke_count[i];
+  cprintf("PID\tTotal Syscalls\n");
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p->state != UNUSED) {
+      int total_syscalls = 0;
+      for(int i = 0; i < NUM_SYSCALLS; i++) {
+        total_syscalls += p->syscall_count[i];
       }
-      cprintf("%d       \t%d\n", p->pid, total_syscall_invokes);
+      cprintf("%d\t%d\n", p->pid, total_syscalls);
     }
   }
-  release(&ptable.lock); 
+  release(&ptable.lock);
+  
   return 0;
 }
+

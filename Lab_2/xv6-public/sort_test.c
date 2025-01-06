@@ -3,15 +3,12 @@
 #include "user.h"
 #include "fcntl.h"
 
-int main(int argc,char* argv[]) 
-{
-    if(argc != 2)
-    {
-        printf(2, "Error Usage\n");
-    }
+int main(int argc,char* argv[]) {
+
     int pid = atoi(argv[1]);
 
-    if(sort_syscalls(pid) == -1){
+
+    if(sort_syscalls(pid)<0){
         printf(2, "process not found\n");
     } 
     exit();

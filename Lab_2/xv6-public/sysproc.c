@@ -78,7 +78,7 @@ sys_sleep(void)
 }
 
 // return how many clock tick interrupts have occurred
-// since start.
+// since start.  int num = curproc->tf->eax;
 int
 sys_uptime(void)
 {
@@ -89,15 +89,13 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
-
-int
-sys_sort_syscalls(void)
-{
+int sys_sort_syscalls(void){
   int pid;
     if (argint(0, &pid) < 0)
         return -1;
     return sort_syscalls(pid);
 }
+
 
 int
 sys_get_most_invoked_syscall(void)
@@ -105,11 +103,12 @@ sys_get_most_invoked_syscall(void)
   int pid;
   if(argint(0, &pid) < 0)
     return -1;
-  return get_most_invoked_syscall(pid);
+  return get_most_invoked_syscall_impl(pid);
 }
 
 int
 sys_list_all_processes(void)
 {
-  return list_all_processes();
+  return list_all_processes_impl();
 }
+
