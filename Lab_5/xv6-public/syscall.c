@@ -5,6 +5,7 @@
 #include "mmu.h"
 #include "proc.h"
 #include "x86.h"
+#include <stdint.h>
 #include "syscall.h"
 
 // User code makes a system call with INT T_SYSCALL.
@@ -105,7 +106,9 @@ extern int sys_unlink(void);
 extern int sys_wait(void);
 extern int sys_write(void);
 extern int sys_uptime(void);
-extern uint64 sys_open_sharedmem(void);
+extern uint64_t sys_open_sharedmem(void);
+extern uint64_t sys_close_sharedmem(void);
+
 
 
 static int (*syscalls[])(void) = {
@@ -131,6 +134,8 @@ static int (*syscalls[])(void) = {
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
 [SYS_open_sharedmem] sys_open_sharedmem,
+[SYS_close_sharedmem] sys_close_sharedmem,
+
 
 };
 

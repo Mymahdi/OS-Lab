@@ -30,6 +30,18 @@ uint64_t sys_open_sharedmem(void) {
     return (uint64_t)sharedmem_table[id].frame;
 }
 
+uint64_t sys_close_sharedmem(void) {
+    int id;
+    if (argint(0, &id) < 0)
+        return -1;
+
+    acquire(&sharedmem_table[id].lock);
+    if (sharedmem_table[id].ref_count > 0)
+        sharedmem_table[id].ref_count--;
+    release(&sharedmem_table[id].lock);
+
+    return 0;
+}
 
 
 int
