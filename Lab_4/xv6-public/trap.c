@@ -33,9 +33,6 @@ idtinit(void)
 }
 
 //PAGEBREAK: 41
-// Declare the global totalSysCalls counter at the top of trap.c
- uint totalSysCalls = 0;  // Tracks the total number of system calls
-
 void
 trap(struct trapframe *tf)
 {
@@ -43,21 +40,6 @@ trap(struct trapframe *tf)
     if(myproc()->killed)
       exit();
     myproc()->tf = tf;
-    
-    // Increment the SysCallCounter for the current CPU based on the syscall ID
-    uint syscall_id = tf->eax;
-    struct cpu *cpu = mycpu();  // Get current CPU
-    if (syscall_id == 4) { // write syscall
-      cpu->SysCallCounter += 2;
-    } else if (syscall_id == 5) { // open syscall
-      cpu->SysCallCounter += 3;
-    } else {
-      cpu->SysCallCounter += 1;
-    }
-
-    // Increment the global total system call counter
-    totalSysCalls++;  // Increment the global counter
-
     syscall();
     if(myproc()->killed)
       exit();
