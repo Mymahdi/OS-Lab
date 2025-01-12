@@ -6,6 +6,7 @@ struct pipe;
 struct proc;
 struct rtcdate;
 struct spinlock;
+struct reentrant_lock;
 struct sleeplock;
 struct stat;
 struct superblock;
@@ -120,6 +121,9 @@ void            userinit(void);
 int             wait(void);
 void            wakeup(void*);
 void            yield(void);
+void            rinit(void);
+int             test(int);
+
 
 // swtch.S
 void            swtch(struct context**, struct context*);
@@ -132,6 +136,10 @@ void            initlock(struct spinlock*, char*);
 void            release(struct spinlock*);
 void            pushcli(void);
 void            popcli(void);
+void            InitReentrantLock(struct reentrant_lock*,char*);
+void            reentrant_acquire(struct reentrant_lock*);
+void            release_reentrant_lock(struct reentrant_lock*);
+
 
 // sleeplock.c
 void            acquiresleep(struct sleeplock*);
@@ -155,6 +163,7 @@ int             argstr(int, char**);
 int             fetchint(uint, int*);
 int             fetchstr(uint, char**);
 void            syscall(void);
+int             nsyscalls(void);
 
 // timer.c
 void            timerinit(void);

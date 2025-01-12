@@ -1,6 +1,6 @@
 struct stat;
 struct rtcdate;
-
+struct reentrant_lock;
 // system calls
 int fork(void);
 int exit(void) __attribute__((noreturn));
@@ -23,7 +23,8 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
-
+int test(int);
+int nsyscalls(void);
 // ulib.c
 int stat(const char*, struct stat*);
 char* strcpy(char*, const char*);
