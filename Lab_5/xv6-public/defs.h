@@ -11,13 +11,6 @@ struct sleeplock;
 struct stat;
 struct superblock;
 
-struct sharedmem_page {
-    int id;
-    void* frame;
-    int ref_count;
-    struct spinlock lock;
-};
-
 // bio.c
 void            binit(void);
 struct buf*     bread(uint, uint);
@@ -178,6 +171,12 @@ void            uartinit(void);
 void            uartintr(void);
 void            uartputc(int);
 
+// new vm.c
+void            initspin(struct spinlock* lock);
+void            accspin(struct spinlock* lock);
+void            relspin(struct spinlock* lock);
+char*           openshmem(int id);
+int             closeshmem(int id);
 // vm.c
 void            seginit(void);
 void            kvmalloc(void);
@@ -193,6 +192,7 @@ void            switchuvm(struct proc*);
 void            switchkvm(void);
 int             copyout(pde_t*, uint, void*, uint);
 void            clearpteu(pde_t *pgdir, char *uva);
+
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
