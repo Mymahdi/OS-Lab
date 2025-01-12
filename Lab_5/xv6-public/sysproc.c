@@ -6,43 +6,51 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "proc.h"
-#include "vm.c"
-#include <stdint.h>
+
+void sys_acquire_spin(void) {
+    struct spinlock* lock;
+    if(argptr(0, (void*)&lock, sizeof(uint) + sizeof(char*) + sizeof(char*) + sizeof(uint)) < 0)
+        return;
+    acquire(lock);
+    return;
+}
+
+void sys_initialize_spin(void) {
+    struct spinlock* lock;
+    if(argptr(0, (void*)&lock, sizeof(uint) + sizeof(char*) + sizeof(char*) + sizeof(uint)) < 0)
+        return;
+    initlock(lock, "spin");
+    return;
+}
 
 
-uint64_t sys_open_sharedmem(void) {
+void sys_release_spin(void) {
+  struct spinlock* lock;
+  if(argptr(0, (void*)&lock, sizeof(uint) + sizeof(char*) + sizeof(char*) + sizeof(uint)) < 0)
+    return;
+  release(lock);
+  return;
+}
+
+int sys_close_sharedmem(void) {
     int id;
-    if (argint(0, &id) < 0)
-        return -1;
-
-    acquire(&sharedmem_table[id].lock);
-    if (sharedmem_table[id].ref_count == 0) {
-        sharedmem_table[id].frame = kalloc(); // Allocate physical memory
-        if (!sharedmem_table[id].frame) {
-            release(&sharedmem_table[id].lock);
-            return -1;
-        }
-        sharedmem_table[id].id = id;
+    if (argint(0, &id) < 0) {
+        cprintf("arg err\n");
+        return 0;
     }
-    sharedmem_table[id].ref_count++;
-    release(&sharedmem_table[id].lock);
 
-    return (uint64_t)sharedmem_table[id].frame;
+    return closeshmem(id);
 }
 
-uint64_t sys_close_sharedmem(void) {
+char* sys_open_sharedmem(void) {
     int id;
-    if (argint(0, &id) < 0)
-        return -1;
+    if (argint(0, &id) < 0) {
+        cprintf("arg err\n");
+        return 0;
+    }
 
-    acquire(&sharedmem_table[id].lock);
-    if (sharedmem_table[id].ref_count > 0)
-        sharedmem_table[id].ref_count--;
-    release(&sharedmem_table[id].lock);
-
-    return 0;
+    return openshmem(id);
 }
-
 
 int
 sys_fork(void)
