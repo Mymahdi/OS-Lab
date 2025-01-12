@@ -7,6 +7,11 @@
 #include "proc.h"
 #include "elf.h"
 
+#define MAX_SHARED_PAGES 64
+
+struct sharedmem_page sharedmem_table[MAX_SHARED_PAGES];
+
+
 extern char data[];  // defined by kernel.ld
 pde_t *kpgdir;  // for use in scheduler()
 

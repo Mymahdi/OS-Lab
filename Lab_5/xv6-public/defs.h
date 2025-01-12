@@ -10,6 +10,13 @@ struct sleeplock;
 struct stat;
 struct superblock;
 
+struct sharedmem_page {
+    int id;
+    void* frame;
+    int ref_count;
+    struct spinlock lock;
+};
+
 // bio.c
 void            binit(void);
 struct buf*     bread(uint, uint);
