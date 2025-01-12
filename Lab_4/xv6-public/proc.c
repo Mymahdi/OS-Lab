@@ -11,7 +11,8 @@ struct {
   struct spinlock lock;
   struct proc proc[NPROC];
 } ptable;
-
+struct reentrant_lock rlock;
+struct spinlock rspimlock;
 static struct proc *initproc;
 
 int nextpid = 1;
@@ -26,6 +27,7 @@ pinit(void)
   initlock(&ptable.lock, "ptable");
 }
 
+
 // Must be called with interrupts disabled
 int
 cpuid() {
@@ -34,30 +36,23 @@ cpuid() {
 
 // Must be called with interrupts disabled to avoid the caller being
 // rescheduled between reading lapicid and running through the loop.
-struct cpu* mycpu(void)
+struct cpu*
+mycpu(void)
 {
   int apicid, i;
   
-  if(readeflags() & FL_IF)
+  if(readeflags()&FL_IF)
     panic("mycpu called with interrupts enabled\n");
-
-  apicid = lapicid();
   
+  apicid = lapicid();
   // APIC IDs are not guaranteed to be contiguous. Maybe we should have
   // a reverse map, or reserve a register to store &cpus[i].
   for (i = 0; i < ncpu; ++i) {
-    if (cpus[i].apicid == apicid) {
-      // Initialize SysCallCounter for the current CPU (if not already done)
-      if (cpus[i].SysCallCounter == 0) {
-        cpus[i].SysCallCounter = 0;  // Initialize SysCallCounter to 0
-      }
+    if (cpus[i].apicid == apicid)
       return &cpus[i];
-    }
   }
-
   panic("unknown apicid\n");
 }
-
 
 // Disable interrupts so that we are not rescheduled
 // while reading proc from the cpu structure
@@ -538,4 +533,28 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+void rinit(void){
+  InitReentrantLock(&rlock,"salam");
+}
+
+int test(int depth) {
+    if (depth <= 0)
+        return 1;
+
+    // printf(1, "Thread %d acquiring lock at depth %d\n", getpid(), depth);
+    reentrant_acquire(&rlock);
+
+    cprintf("Thread %d acquired lock at depth %d\n", myproc()->pid, depth);
+    test(depth - 1);
+
+    cprintf("Thread %d releasing lock at depth %d\n", myproc()->pid, depth);
+    release_reentrant_lock(&rlock);
+    return 0;
+}
+
+int nsyscalls(void) {
+    getnsyscall();
+    return 0;
 }
