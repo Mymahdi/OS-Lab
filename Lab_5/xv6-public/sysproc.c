@@ -6,6 +6,31 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "proc.h"
+#include "vm.c"
+#include <stdint.h>
+
+
+uint64_t sys_open_sharedmem(void) {
+    int id;
+    if (argint(0, &id) < 0)
+        return -1;
+
+    acquire(&sharedmem_table[id].lock);
+    if (sharedmem_table[id].ref_count == 0) {
+        sharedmem_table[id].frame = kalloc(); // Allocate physical memory
+        if (!sharedmem_table[id].frame) {
+            release(&sharedmem_table[id].lock);
+            return -1;
+        }
+        sharedmem_table[id].id = id;
+    }
+    sharedmem_table[id].ref_count++;
+    release(&sharedmem_table[id].lock);
+
+    return (uint64_t)sharedmem_table[id].frame;
+}
+
+
 
 int
 sys_fork(void)
