@@ -6,10 +6,10 @@
 #include "mmu.h"
 #include "proc.h"
 #include "elf.h"
+#include "spinlock.h"
 
 #define MAX_SHARED_PAGES 64
-
-struct sharedmem_page sharedmem_table[MAX_SHARED_PAGES];
+#define HEAPLIMIT 0x7F000000
 
 
 extern char data[];  // defined by kernel.ld
@@ -108,15 +108,15 @@ mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm)
 // This table defines the kernel's mappings, which are present in
 // every process's page table.
 static struct kmap {
-  void *virt;
-  uint phys_start;
-  uint phys_end;
-  int perm;
+    void* virt;
+    uint phys_start;
+    uint phys_end;
+    int perm;
 } kmap[] = {
- { (void*)KERNBASE, 0,             EXTMEM,    PTE_W}, // I/O space
- { (void*)KERNLINK, V2P(KERNLINK), V2P(data), 0},     // kern text+rodata
- { (void*)data,     V2P(data),     PHYSTOP,   PTE_W}, // kern data+memory
- { (void*)DEVSPACE, DEVSPACE,      0,         PTE_W}, // more devices
+    {(void*)KERNBASE, 0, EXTMEM, PTE_W},            // I/O space
+    {(void*)KERNLINK, V2P(KERNLINK), V2P(data), 0}, // kern text+rodata
+    {(void*)data, V2P(data), PHYSTOP, PTE_W},       // kern data+memory
+    {(void*)DEVSPACE, DEVSPACE, 0, PTE_W},          // more devices
 };
 
 // Set up kernel part of a page table.
@@ -388,6 +388,125 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
     va = va0 + PGSIZE;
   }
   return 0;
+}
+
+
+// shared memory
+
+struct shpage {
+    int id;
+    int n_access;
+    uint physical_addr;
+};
+
+struct shared_memory_table {
+    struct shpage pages[MAX_SHARED_PAGES];
+    struct spinlock lock;
+} shared_memory_table;
+
+char *lookup_table(int id, struct proc *proc)
+{
+    for (int i = 0; i < MAX_SHARED_PAGES; i++)
+    {
+        if (shared_memory_table.pages[i].id == id)
+        {
+            shared_memory_table.pages[i].n_access++;
+            char *vaddr = (char *)PGROUNDUP(proc->sz);
+            if (mappages(proc->pgdir, vaddr, PGSIZE, shared_memory_table.pages[i].physical_addr, PTE_W | PTE_U) < 0)
+                return (char *)-1;
+            proc->sz += PGSIZE;
+            proc->shmemaddr = (uint)vaddr;
+            return vaddr;
+        }
+    }
+    return (char*)-1;
+}
+
+char* openshmem(int id) {
+    acquire(&shared_memory_table.lock);
+    struct proc* proc = myproc();
+
+    char *ret = lookup_table(id, proc);
+    if ((int)ret != -1){
+        release(&shared_memory_table.lock);
+        return ret;
+    }
+
+    int page_index = -1;
+    for (int i = 0; i < MAX_SHARED_PAGES; i++) {
+        if (shared_memory_table.pages[i].id == 0) {
+            page_index = i;
+            shared_memory_table.pages[i].id = id;
+            break;
+        }
+    }
+
+    if (page_index == -1) {
+        cprintf("pages are full\n");
+        release(&shared_memory_table.lock);
+        return (char*)-1;
+    }
+
+    char* physical_address = kalloc();
+    if (physical_address == 0) {
+        cprintf("out of memory\n");
+        release(&shared_memory_table.lock);
+        return (char*)-1;
+    }
+
+    memset(physical_address, 0, PGSIZE);
+    char* vaddr = (char*)PGROUNDUP(proc->sz);
+    shared_memory_table.pages[page_index].physical_addr = (uint)V2P(physical_address);
+
+    if (mappages(proc->pgdir, vaddr, PGSIZE, shared_memory_table.pages[page_index].physical_addr, PTE_W | PTE_U) < 0) {
+        cprintf("mappages failed\n");
+        release(&shared_memory_table.lock);
+        return vaddr;
+    }
+
+    shared_memory_table.pages[page_index].n_access++;
+    proc->sz += PGSIZE;
+    proc->shmemaddr = (uint)vaddr;
+
+    release(&shared_memory_table.lock);
+    return vaddr;
+}
+
+int closeshmem(int id)
+{
+    acquire(&shared_memory_table.lock);
+
+    int page_index = -1;
+    for(int i = 0; i < MAX_SHARED_PAGES; i++) {
+        if(shared_memory_table.pages[i].id == id) {
+            page_index = i;
+            break;
+        }
+    }
+
+    if(page_index == -1) {
+        cprintf("page not found!\n");
+        release(&shared_memory_table.lock);
+        return -1;
+    }
+
+    struct proc *proc = myproc();
+    pte_t* pte = walkpgdir(proc->pgdir, (char*)PGROUNDUP(proc->shmemaddr), 0);
+    *pte = 0;
+
+    shared_memory_table.pages[page_index].n_access--;
+    if(shared_memory_table.pages[page_index].n_access != 0) {
+        cprintf("closed\n");
+        release(&shared_memory_table.lock);
+        return 0;
+    }
+    
+    kfree((char*)P2V(shared_memory_table.pages[page_index].physical_addr));
+    shared_memory_table.pages[page_index].id = 0;
+
+    cprintf("closed and free\n");
+    release(&shared_memory_table.lock);
+    return 0;
 }
 
 //PAGEBREAK!
