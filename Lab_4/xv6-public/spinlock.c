@@ -8,9 +8,6 @@
 #include "mmu.h"
 #include "proc.h"
 #include "spinlock.h"
-#define NULL ((void *)0)
-
-// Spinlock functions remain unchanged
 
 void
 initlock(struct spinlock *lk, char *name)
@@ -20,36 +17,75 @@ initlock(struct spinlock *lk, char *name)
   lk->cpu = 0;
 }
 
+// Acquire the lock.
+// Loops (spins) until the lock is acquired.
+// Holding a lock for a long time may cause
+// other CPUs to waste time spinning to acquire it.
 void
 acquire(struct spinlock *lk)
 {
   pushcli(); // disable interrupts to avoid deadlock.
-  if (holding(lk))
+  if(holding(lk))
     panic("acquire");
 
-  while (xchg(&lk->locked, 1) != 0)
+  // The xchg is atomic.
+  while(xchg(&lk->locked, 1) != 0)
     ;
 
+  // Tell the C compiler and the processor to not move loads or stores
+  // past this point, to ensure that the critical section's memory
+  // references happen after the lock is acquired.
   __sync_synchronize();
+
+  // Record info about lock acquisition for debugging.
   lk->cpu = mycpu();
   getcallerpcs(&lk, lk->pcs);
 }
 
+// Release the lock.
 void
 release(struct spinlock *lk)
 {
-  if (!holding(lk))
+  if(!holding(lk))
     panic("release");
 
   lk->pcs[0] = 0;
   lk->cpu = 0;
 
+  // Tell the C compiler and the processor to not move loads or stores
+  // past this point, to ensure that all the stores in the critical
+  // section are visible to other cores before the lock is released.
+  // Both the C compiler and the hardware may re-order loads and
+  // stores; __sync_synchronize() tells them both not to.
   __sync_synchronize();
 
-  asm volatile("movl $0, %0" : "+m"(lk->locked) :);
+  // Release the lock, equivalent to lk->locked = 0.
+  // This code can't use a C assignment, since it might
+  // not be atomic. A real OS would use C atomics here.
+  asm volatile("movl $0, %0" : "+m" (lk->locked) : );
+
   popcli();
 }
 
+// Record the current call stack in pcs[] by following the %ebp chain.
+void
+getcallerpcs(void *v, uint pcs[])
+{
+  uint *ebp;
+  int i;
+
+  ebp = (uint*)v - 2;
+  for(i = 0; i < 10; i++){
+    if(ebp == 0 || ebp < (uint*)KERNBASE || ebp == (uint*)0xffffffff)
+      break;
+    pcs[i] = ebp[1];     // saved %eip
+    ebp = (uint*)ebp[0]; // saved %ebp
+  }
+  for(; i < 10; i++)
+    pcs[i] = 0;
+}
+
+// Check whether this cpu is holding the lock.
 int
 holding(struct spinlock *lock)
 {
@@ -60,51 +96,73 @@ holding(struct spinlock *lock)
   return r;
 }
 
-// Reentrant lock implementation
+
+// Pushcli/popcli are like cli/sti except that they are matched:
+// it takes two popcli to undo two pushcli.  Also, if interrupts
+// are off, then pushcli, popcli leaves them off.
 
 void
-initreentrantlock(struct reentrantlock *lk, char *name)
+pushcli(void)
 {
-  initlock(&lk->lock, name); // Initialize underlying spinlock
-  lk->owner = 0;            // No owner initially
-  lk->recursion = 0;        // Recursion depth is 0
+  int eflags;
+
+  eflags = readeflags();
+  cli();
+  if(mycpu()->ncli == 0)
+    mycpu()->intena = eflags & FL_IF;
+  mycpu()->ncli += 1;
 }
 
 void
-acquirereentrantlock(struct reentrantlock *lk)
+popcli(void)
 {
-  struct proc *current = myproc();
-
-  // If current process already owns the lock, increment recursion depth
-  if (lk->owner == current)
-  {
-    lk->recursion++;
-    return;
-  }
-
-  // Acquire the underlying spinlock
-  acquire(&lk->lock);
-
-  // Set the owner to the current process and initialize recursion depth
-  lk->owner = current;
-  lk->recursion = 1;
+  if(readeflags()&FL_IF)
+    panic("popcli - interruptible");
+  if(--mycpu()->ncli < 0)
+    panic("popcli");
+  if(mycpu()->ncli == 0 && mycpu()->intena)
+    sti();
 }
 
-void
-releasereentrantlock(struct reentrantlock *lk)
-{
-  // Ensure current process owns the lock
-  if (lk->owner != myproc())
-    panic("releasereentrantlock: not the owner");
+void InitReentrantLock(struct reentrant_lock *rlock, char *name) {
+    initlock(&rlock->lock, name);
+    rlock->holder = 0;
+    rlock->recursion_depth = 0;
+}
+void reentrant_acquire(struct reentrant_lock *rlock) {
+  
+    struct proc *current_proc = myproc();
 
-  // Decrease recursion depth
-  lk->recursion--;
+    
+    if (rlock->holder->pid == current_proc->pid) {
+        
+        rlock->recursion_depth++;
 
-  // If recursion depth is 0, release the underlying spinlock
-  if (lk->recursion == 0)
-  {
-    lk->owner = 0; // Clear the owner
-    release(&lk->lock);
-  }
+        return;
+    }
+    
+    acquire(&rlock->lock);
+    rlock->holder = current_proc;
+    rlock->recursion_depth = 1;
+    
+    
+    
 }
 
+void release_reentrant_lock(struct reentrant_lock *rlock) {
+    if (rlock->holder != myproc()) {
+        panic("release_reentrant_lock: lock not held by current process");
+    }
+
+    rlock->recursion_depth--;
+
+    if (rlock->recursion_depth == 0) {
+        rlock->holder = 0;
+
+        
+        
+        cprintf("release\n");
+        release(&rlock->lock);
+        
+    }
+}
