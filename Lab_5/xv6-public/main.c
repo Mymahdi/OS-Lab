@@ -5,22 +5,11 @@
 #include "mmu.h"
 #include "proc.h"
 #include "x86.h"
-#include "vm.c"
 
 static void startothers(void);
 static void mpmain(void)  __attribute__((noreturn));
 extern pde_t *kpgdir;
 extern char end[]; // first address after kernel loaded from ELF file
-
-
-void init_sharedmem_table() {
-    for (int i = 0; i < MAX_SHARED_PAGES; i++) {
-        sharedmem_table[i].id = -1; // -1 indicates unused
-        sharedmem_table[i].frame = 0;
-        sharedmem_table[i].ref_count = 0;
-        initlock(&sharedmem_table[i].lock, "shm_lock");
-    }
-}
 
 // Bootstrap processor starts running C code here.
 // Allocate a real stack and switch to it, first
