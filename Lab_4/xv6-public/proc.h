@@ -1,7 +1,3 @@
-#include "x86.h"
-#include "param.h"
-#include"mmu.h"
-
 // Per-CPU state
 struct cpu {
   uchar apicid;                // Local APIC ID
@@ -12,7 +8,7 @@ struct cpu {
   int ncli;                    // Depth of pushcli nesting.
   int intena;                  // Were interrupts enabled before pushcli?
   struct proc *proc;           // The process running on this cpu or null
-  uint SysCallCounter; 
+  int nsyscall;                // Number of syscalls
 };
 
 extern struct cpu cpus[NCPU];
