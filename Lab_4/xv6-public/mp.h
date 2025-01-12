@@ -1,4 +1,6 @@
 // See MultiProcessor Specification Version 1.[14]
+#include "spinlock.h"
+extern struct nsyslock nsys;
 
 struct mp {             // floating pointer
   uchar signature[4];           // "_MP_"
@@ -52,5 +54,10 @@ struct mpioapic {       // I/O APIC table entry
 #define MPIOINTR  0x03  // One per bus interrupt source
 #define MPLINTR   0x04  // One per system interrupt source
 
+//number of total system calls which has been called
+struct nsyslock {
+    struct spinlock lk;
+    int n;
+};
 //PAGEBREAK!
 // Blank page.
