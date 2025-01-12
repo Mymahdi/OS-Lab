@@ -1,5 +1,6 @@
 struct stat;
 struct rtcdate;
+struct spinlock;
 
 // system calls
 int fork(void);
@@ -23,8 +24,11 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
-int open_sharedmem(int id);
-int close_sharedmem(int id);
+void accspin(struct spinlock*);
+void initspin(struct spinlock*);
+void relspin(struct spinlock*);
+char *openshmem(int);
+int closeshmem(int);
 
 
 // ulib.c
