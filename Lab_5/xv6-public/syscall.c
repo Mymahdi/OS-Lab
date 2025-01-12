@@ -106,10 +106,13 @@ extern int sys_unlink(void);
 extern int sys_wait(void);
 extern int sys_write(void);
 extern int sys_uptime(void);
-extern uint64_t sys_open_sharedmem(void);
-extern uint64_t sys_close_sharedmem(void);
+extern int sys_open_sharedmem(void);
+extern int sys_close_sharedmem(void);
 
 
+extern int sys_initialize_spin(void);
+extern int sys_acquire_spin(void);
+extern int sys_release_spin(void);
 
 static int (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -133,10 +136,13 @@ static int (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
-[SYS_open_sharedmem] sys_open_sharedmem,
-[SYS_close_sharedmem] sys_close_sharedmem,
+[SYS_openshmem] sys_open_sharedmem,
+[SYS_closeshmem] sys_close_sharedmem,
 
 
+[SYS_initspin] sys_initialize_spin,
+[SYS_relspin] sys_release_spin,
+[SYS_accspin] sys_acquire_spin,
 };
 
 void
