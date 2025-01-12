@@ -536,7 +536,7 @@ procdump(void)
 }
 
 void rinit(void){
-  InitReentrantLock(&rlock,"salam");
+  InitReentrantLock(&rlock,"initializing");
 }
 
 int test(int depth) {
